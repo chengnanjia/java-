@@ -8,6 +8,7 @@
 - 新增 Maven 构建忽略规则，停止跟踪编译产物；MP3 播放依赖统一由 Maven 管理。
 - 使用 Maven Shade Plugin 将运行依赖打入可执行 JAR，清单入口为 `com.musicplayer.ui.MainFrame`。
 - 加入 JUnit 5、Maven Surefire 和 UTF-8 源码编码配置，为后续自动化测试做准备。
+- 从 WAV/PCM 输出链路扩展到 FLAC 解码，支持 8/16/24 位单声道与立体声，并按 STREAMINFO 计算时长。
 
 ## 已解决的问题
 
@@ -35,6 +36,10 @@ java -jar target/JavaMusicPlayer-1.0-SNAPSHOT.jar
 ```
 
 JAR 内含应用及 Maven 运行依赖。当前默认曲库目录为 `JavaMusicPlayer/resources/music`，歌词目录为 `JavaMusicPlayer/resources/lyrics`；由于曲库持久化和与工作目录解耦的资源定位尚未实现，运行 JAR 时需将工作目录设为 `JavaMusicPlayer`。也可通过窗口添加按钮或拖入 MP3 文件。
+
+FLAC 解码使用 `org.jflac:jflac-codec:1.5.2`，该依赖按 LGPL-2.1 许可发布。分发包含该依赖的应用时，请遵守 LGPL 的再分发要求，并随包提供相应许可证及源码获取方式；当前 Shade JAR 尚未完成许可证材料的打包配置。
+
+`JavaMusicPlayer/src/test/resources/audio` 中的短音频是合成正弦波夹具，使用 ffmpeg 的 FLAC 编码器生成（分别为 44.1 kHz/16 位/双声道和 32 kHz/24 位/单声道）；SeekTable 测试在临时副本中加入最小测试表，不修改原始夹具。
 
 运行测试：
 

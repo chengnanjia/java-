@@ -3,6 +3,7 @@ package com.musicplayer.player;
 import com.mpatric.mp3agic.Mp3File;
 import com.musicplayer.model.Music;
 import com.musicplayer.player.decode.AudioDecoder;
+import com.musicplayer.player.decode.FlacDecoder;
 import com.musicplayer.player.decode.WavDecoder;
 import com.musicplayer.player.output.AdvancedPlayerAudioDevice;
 import com.musicplayer.player.output.PcmOutput;
@@ -68,7 +69,7 @@ public final class PlaybackController {
     }
 
     private void prepareTrack(long token, Music music) {
-        if (isWavTrack(music)) {
+        if (isPcmTrack(music)) {
             preparePcmTrack(token, music, 0, true);
             return;
         }
@@ -91,7 +92,7 @@ public final class PlaybackController {
 
     private void preparePcmTrack(long token, Music music, long startOffsetMillis,
                                 boolean notifyReady) {
-        AudioDecoder decoder = new WavDecoder();
+        AudioDecoder decoder = isFlacTrack(music) ? new FlacDecoder() : new WavDecoder();
         try {
             decoder.open(Path.of(music.getPath()));
             long trackDuration = decoder.durationMillis();
@@ -155,8 +156,13 @@ public final class PlaybackController {
         }
     }
 
-    private boolean isWavTrack(Music music) {
-        return music.getPath().toLowerCase(java.util.Locale.ROOT).endsWith(".wav");
+    private boolean isPcmTrack(Music music) {
+        String path = music.getPath().toLowerCase(java.util.Locale.ROOT);
+        return path.endsWith(".wav") || path.endsWith(".flac");
+    }
+
+    private boolean isFlacTrack(Music music) {
+        return music.getPath().toLowerCase(java.util.Locale.ROOT).endsWith(".flac");
     }
 
     private void startSession(long token, Music music, int startFrame, long startOffsetMillis) {
@@ -232,7 +238,7 @@ public final class PlaybackController {
             }
         }
         if (resume) {
-            if (isWavTrack(music)) preparePcmTrack(token, music, positionMillis, false);
+            if (isPcmTrack(music)) preparePcmTrack(token, music, positionMillis, false);
             else if (frameCount == 0) prepareTrack(token, music);
             else startSession(token, music, frame, positionMillis);
         } else {
@@ -272,7 +278,7 @@ public final class PlaybackController {
         }
         listener.onPosition(positionMillis);
         if (restart) {
-            if (isWavTrack(music)) preparePcmTrack(token, music, positionMillis, false);
+            if (isPcmTrack(music)) preparePcmTrack(token, music, positionMillis, false);
             else startSession(token, music, frame, positionMillis);
         }
     }
