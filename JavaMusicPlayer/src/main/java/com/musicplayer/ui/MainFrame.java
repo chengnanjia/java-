@@ -173,15 +173,9 @@ public final class MainFrame extends JFrame {
     private void loadLyrics(Music music) {
         new javax.swing.SwingWorker<List<LrcParser.LyricLine>, Void>() {
             @Override protected List<LrcParser.LyricLine> doInBackground() throws Exception {
-                Path audio = Path.of(music.getPath());
-                String filename = audio.getFileName().toString();
-                int dot = filename.lastIndexOf('.');
-                String base = dot > 0 ? filename.substring(0, dot) : filename;
-                Path sibling = audio.resolveSibling(base + ".lrc");
-                Path libraryLyric = Path.of("resources", "lyrics", music.getName() + ".lrc");
-                Path lyricPath = Files.isRegularFile(sibling) ? sibling : libraryLyric;
-                if (!Files.isRegularFile(lyricPath)) return List.of();
-                return LrcParser.parse(lyricPath);
+                Path libraryLyrics = Path.of("resources", "lyrics");
+                var lyricPath = LyricFileLocator.findLyrics(music, libraryLyrics);
+                return lyricPath.isEmpty() ? List.of() : LrcParser.parse(lyricPath.get());
             }
             @Override protected void done() {
                 if (!sameTrack(currentTrack, music)) return;
