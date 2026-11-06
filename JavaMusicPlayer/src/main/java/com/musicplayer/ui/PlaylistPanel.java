@@ -87,7 +87,7 @@ public final class PlaylistPanel extends JPanel {
         search.setCaretColor(accent);
         search.setBorder(new EmptyBorder(9, 0, 9, 0));
         search.setFont(search.getFont().deriveFont(12f));
-        search.setToolTipText("搜索歌名、歌手、专辑或文件名");
+        search.setToolTipText("搜索歌名、歌手、专辑或文件名，支持中文拼音");
         searchBox.add(search, BorderLayout.CENTER);
         search.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             @Override public void insertUpdate(javax.swing.event.DocumentEvent event) { filter(); }
