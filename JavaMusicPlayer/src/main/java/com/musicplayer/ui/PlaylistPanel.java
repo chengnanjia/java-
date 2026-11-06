@@ -87,7 +87,7 @@ public final class PlaylistPanel extends JPanel {
         search.setCaretColor(accent);
         search.setBorder(new EmptyBorder(9, 0, 9, 0));
         search.setFont(search.getFont().deriveFont(12f));
-        search.setToolTipText("搜索歌曲或歌手");
+        search.setToolTipText("搜索歌名、歌手、专辑或文件名");
         searchBox.add(search, BorderLayout.CENTER);
         search.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             @Override public void insertUpdate(javax.swing.event.DocumentEvent event) { filter(); }
@@ -201,7 +201,6 @@ public final class PlaylistPanel extends JPanel {
                 try {
                     for (Music track : get()) tracks.addElement(track);
                     filter();
-                    count.setText(tracks.size() + " 首歌曲");
                     if (visibleTracks.size() > 0 && list.getSelectedIndex() < 0) list.setSelectedIndex(0);
                 } catch (Exception ignored) {
                     count.setText("读取歌曲失败");
@@ -219,24 +218,30 @@ public final class PlaylistPanel extends JPanel {
     }
 
     private void filter() {
-        String query = search.getText().trim().toLowerCase(Locale.ROOT);
+        String query = search.getText().trim();
         Music selected = list.getSelectedValue();
         visibleTracks.clear();
+        int selectedIndex = -1;
         for (int index = 0; index < tracks.size(); index++) {
             Music track = tracks.get(index);
-            if (query.isEmpty() || (track.getName() + " " + track.getArtist()).toLowerCase(Locale.ROOT).contains(query)) {
+            if (PlaylistSearch.matches(track, query)) {
+                if (selected != null && selected.getPath().equals(track.getPath())) {
+                    selectedIndex = visibleTracks.size();
+                }
                 visibleTracks.addElement(track);
             }
         }
-        if (selected != null) {
-            for (int index = 0; index < visibleTracks.size(); index++) {
-                if (visibleTracks.get(index).getPath().equals(selected.getPath())) {
-                    list.setSelectedIndex(index);
-                    break;
-                }
-            }
+        list.clearSelection();
+        if (selectedIndex >= 0) {
+            list.setSelectedIndex(selectedIndex);
         }
-        count.setText(tracks.size() + " 首歌曲");
+        if (query.isEmpty()) {
+            count.setText(tracks.size() + " 首歌曲");
+        } else if (visibleTracks.isEmpty()) {
+            count.setText("没有找到匹配歌曲（共 " + tracks.size() + " 首）");
+        } else {
+            count.setText("找到 " + visibleTracks.size() + " / " + tracks.size() + " 首歌曲");
+        }
         updateRendererTargets();
     }
 
