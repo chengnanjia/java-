@@ -3,6 +3,8 @@ package com.musicplayer.ui;
 import com.musicplayer.model.Music;
 
 import javax.swing.DefaultListModel;
+import javax.swing.AbstractAction;
+import javax.swing.JComponent;
 import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JList;
@@ -13,6 +15,7 @@ import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
 import javax.swing.SwingWorker;
 import javax.swing.TransferHandler;
+import javax.swing.UIManager;
 import javax.swing.border.EmptyBorder;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.BorderLayout;
@@ -23,6 +26,7 @@ import java.awt.FlowLayout;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.event.KeyEvent;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -86,8 +90,24 @@ public final class PlaylistPanel extends JPanel {
         search.setForeground(new Color(231, 234, 239));
         search.setCaretColor(accent);
         search.setBorder(new EmptyBorder(9, 0, 9, 0));
-        search.setFont(search.getFont().deriveFont(12f));
+        java.awt.Font textFont = UIManager.getFont("TextField.font");
+        if (textFont != null) search.setFont(textFont.deriveFont(12f));
         search.setToolTipText("搜索歌名、歌手、专辑或文件名，支持中文拼音");
+        search.getInputMap(JComponent.WHEN_FOCUSED).put(
+                javax.swing.KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "focus-track-list");
+        search.getActionMap().put("focus-track-list", new AbstractAction() {
+            @Override public void actionPerformed(java.awt.event.ActionEvent event) {
+                focusTrackList();
+            }
+        });
+        search.getInputMap(JComponent.WHEN_FOCUSED).put(
+                javax.swing.KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), "clear-or-blur-search");
+        search.getActionMap().put("clear-or-blur-search", new AbstractAction() {
+            @Override public void actionPerformed(java.awt.event.ActionEvent event) {
+                if (!search.getText().isEmpty()) search.setText("");
+                else focusTrackList();
+            }
+        });
         searchBox.add(search, BorderLayout.CENTER);
         search.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             @Override public void insertUpdate(javax.swing.event.DocumentEvent event) { filter(); }
@@ -100,6 +120,7 @@ public final class PlaylistPanel extends JPanel {
     }
 
     private void buildList() {
+        list.setFocusable(true);
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         list.setOpaque(false);
         list.setBackground(new Color(0, 0, 0, 0));
@@ -278,6 +299,14 @@ public final class PlaylistPanel extends JPanel {
         List<Music> result = new ArrayList<>();
         for (int index = 0; index < tracks.size(); index++) result.add(tracks.get(index));
         return Collections.unmodifiableList(result);
+    }
+
+    JTextField getSearchField() {
+        return search;
+    }
+
+    void focusTrackList() {
+        list.requestFocusInWindow();
     }
 
     public void loadInitialTracks(File directory) {

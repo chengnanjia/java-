@@ -42,6 +42,30 @@ FLAC 解码使用 `org.jflac:jflac-codec:1.5.2`，该依赖按 LGPL-2.1 许可�
 
 `JavaMusicPlayer/src/test/resources/audio` 中的短音频是合成正弦波夹具，使用 ffmpeg 的 FLAC 编码器生成（分别为 44.1 kHz/16 位/双声道和 32 kHz/24 位/单声道）；SeekTable 测试在临时副本中加入最小测试表，不修改原始夹具。
 
+## Linux/WSL 中文输入
+
+Linux 桌面需要安装并运行 fcitx/fcitx5 或 ibus 输入法框架及中文输入引擎。环境变量应在启动播放器前设置；不同发行版、桌面会话和 WSLg 配置可能由系统自动设置，以下是常见示例，不保证适用于所有环境。
+
+使用 ibus 时可在启动播放器的终端执行：
+
+```bash
+export XMODIFIERS=@im=ibus
+export GTK_IM_MODULE=ibus
+export QT_IM_MODULE=ibus
+./run.sh
+```
+
+使用 fcitx5 时常见设置为：
+
+```bash
+export XMODIFIERS=@im=fcitx
+export GTK_IM_MODULE=fcitx
+export QT_IM_MODULE=fcitx
+./run.sh
+```
+
+Swing/AWT 在 Linux 下主要通过 XIM（通常由 `XMODIFIERS` 指定输入法）接收组合文本；`GTK_IM_MODULE` 和 `QT_IM_MODULE` 主要供相应工具包使用，不一定会直接影响 Swing。若中文候选窗不出现或位置异常，请确认输入法守护进程已运行、启动应用的进程继承了正确环境变量，并在同一桌面会话中测试。应用使用无装饰 Swing 窗口；输入法候选窗位置由文本组件的插入光标位置提供，`setUndecorated(true)` 本身不应改变该坐标，但不同 Linux/WSLg 图形后端仍需实际环境验证。
+
 运行测试：
 
 ```bash

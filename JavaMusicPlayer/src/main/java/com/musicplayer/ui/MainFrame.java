@@ -4,25 +4,29 @@ import com.formdev.flatlaf.FlatDarkLaf;
 import com.musicplayer.model.Music;
 import com.musicplayer.player.PlayerController;
 
-import javax.swing.JComponent;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import javax.swing.TransferHandler;
 import javax.swing.UIManager;
+import javax.swing.text.JTextComponent;
+import java.awt.AWTEvent;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GraphicsEnvironment;
+import java.awt.KeyboardFocusManager;
 import java.awt.Point;
 import java.awt.RenderingHints;
 import java.awt.Toolkit;
 import java.awt.datatransfer.DataFlavor;
+import java.awt.event.AWTEventListener;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -51,6 +55,8 @@ public final class MainFrame extends JFrame {
     private boolean responsiveSidebarHidden;
     private boolean maximized;
     private final Random random = new Random();
+    private final java.awt.KeyEventDispatcher playbackKeyDispatcher = this::dispatchPlaybackShortcut;
+    private final AWTEventListener searchFocusMouseListener = this::releaseSearchFocusAfterClick;
 
     public MainFrame() {
         super("Java 音乐播放器");
@@ -100,6 +106,10 @@ public final class MainFrame extends JFrame {
         });
         buildWindow();
         bindActions();
+        KeyboardFocusManager.getCurrentKeyboardFocusManager()
+                .addKeyEventDispatcher(playbackKeyDispatcher);
+        Toolkit.getDefaultToolkit().addAWTEventListener(searchFocusMouseListener,
+                AWTEvent.MOUSE_EVENT_MASK);
         setTransferHandler(audioTransferHandler());
         nowPlaying.setAccentListener(this::applyAccent);
         playlist.setOnPlay(this::playTrack);
@@ -111,6 +121,9 @@ public final class MainFrame extends JFrame {
         });
         addWindowListener(new java.awt.event.WindowAdapter() {
             @Override public void windowClosed(java.awt.event.WindowEvent event) {
+                KeyboardFocusManager.getCurrentKeyboardFocusManager()
+                        .removeKeyEventDispatcher(playbackKeyDispatcher);
+                Toolkit.getDefaultToolkit().removeAWTEventListener(searchFocusMouseListener);
                 player.shutdown();
             }
         });
@@ -139,20 +152,44 @@ public final class MainFrame extends JFrame {
         controls.setOnModeChanged(mode -> { });
         nowPlaying.setSeekListener(this::seekTo);
 
-        bindKey(KeyEvent.VK_SPACE, "play-pause", this::togglePlayback);
-        bindKey(KeyEvent.VK_LEFT, "seek-back", () -> seekTo(Math.max(0, currentPositionMillis - 5000)));
-        bindKey(KeyEvent.VK_RIGHT, "seek-forward", () -> seekTo(Math.min(durationMillis, currentPositionMillis + 5000)));
-        bindKey(KeyEvent.VK_UP, "volume-up", () -> controls.adjustVolume(0.05));
-        bindKey(KeyEvent.VK_DOWN, "volume-down", () -> controls.adjustVolume(-0.05));
     }
 
-    private void bindKey(int keyCode, String name, Runnable action) {
-        getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
-                .put(javax.swing.KeyStroke.getKeyStroke(keyCode, 0), name);
-        getRootPane().getActionMap().put(name, new javax.swing.AbstractAction() {
-            @Override public void actionPerformed(java.awt.event.ActionEvent event) {
-                action.run();
-            }
+    private boolean dispatchPlaybackShortcut(KeyEvent event) {
+        if (event.getID() != KeyEvent.KEY_PRESSED
+                || event.getModifiersEx() != 0
+                || KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow() != this) {
+            return false;
+        }
+        Component focusOwner = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
+        // 文本组件负责输入法组合与方向键导航，播放器快捷键必须让它优先处理。
+        if (focusOwner instanceof JTextComponent) return false;
+
+        Runnable action = switch (event.getKeyCode()) {
+            case KeyEvent.VK_SPACE -> this::togglePlayback;
+            case KeyEvent.VK_LEFT ->
+                    () -> seekTo(Math.max(0, currentPositionMillis - 5000));
+            case KeyEvent.VK_RIGHT ->
+                    () -> seekTo(Math.min(durationMillis, currentPositionMillis + 5000));
+            case KeyEvent.VK_UP -> () -> controls.adjustVolume(0.05);
+            case KeyEvent.VK_DOWN -> () -> controls.adjustVolume(-0.05);
+            default -> null;
+        };
+        if (action == null) return false;
+        action.run();
+        event.consume();
+        return true;
+    }
+
+    private void releaseSearchFocusAfterClick(AWTEvent event) {
+        if (!(event instanceof MouseEvent mouseEvent)
+                || mouseEvent.getID() != MouseEvent.MOUSE_PRESSED
+                || !(mouseEvent.getSource() instanceof Component clicked)
+                || SwingUtilities.getWindowAncestor(clicked) != this) {
+            return;
+        }
+        if (SwingUtilities.isDescendingFrom(clicked, playlist.getSearchField())) return;
+        SwingUtilities.invokeLater(() -> {
+            if (playlist.getSearchField().isFocusOwner()) playlist.focusTrackList();
         });
     }
 
