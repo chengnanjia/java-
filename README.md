@@ -41,7 +41,7 @@ JAR 内含应用及 Maven 运行依赖。当前默认曲库目录为 `JavaMusicP
 
 FLAC 解码使用 `org.jflac:jflac-codec:1.5.2`，该依赖按 LGPL-2.1 许可发布。分发包含该依赖的应用时，请遵守 LGPL 的再分发要求，并随包提供相应许可证及源码获取方式；当前 Shade JAR 尚未完成许可证材料的打包配置。
 
-`JavaMusicPlayer/src/test/resources/audio` 中的短音频是合成正弦波夹具，使用 ffmpeg 的 FLAC 编码器生成（分别为 44.1 kHz/16 位/双声道和 32 kHz/24 位/单声道）；SeekTable 测试在临时副本中加入最小测试表，不修改原始夹具。
+`JavaMusicPlayer/src/test/resources/audio` 中的短音频是合成正弦波夹具，使用 ffmpeg 的 FLAC 编码器生成（包括 44.1 kHz/16 位/双声道，以及 32/48/96 kHz 的 24 位单声道）；SeekTable 测试在临时副本中加入最小测试表，不修改原始夹具。
 
 ## Linux/WSL 中文输入
 

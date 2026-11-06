@@ -18,6 +18,8 @@ class FlacDecoderTest {
     void decodesDurationAndPcmForMonoAndStereoAtDifferentRatesAndDepths() throws Exception {
         assertFixture("generated-16bit-stereo.flac", 44100, 2);
         assertFixture("generated-24bit-mono.flac", 32000, 1);
+        assertFixture("generated-24bit-mono-48000.flac", 48000, 1);
+        assertFixture("generated-24bit-mono-96000.flac", 96000, 1);
     }
 
     @Test
