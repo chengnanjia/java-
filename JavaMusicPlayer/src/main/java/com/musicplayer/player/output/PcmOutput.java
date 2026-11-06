@@ -4,9 +4,13 @@ import javax.sound.sampled.AudioFormat;
 import javax.sound.sampled.AudioSystem;
 import javax.sound.sampled.DataLine;
 import javax.sound.sampled.LineUnavailableException;
+import javax.sound.sampled.Mixer;
 import javax.sound.sampled.SourceDataLine;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 public final class PcmOutput implements AutoCloseable {
     interface Sink {
@@ -87,29 +91,77 @@ public final class PcmOutput implements AutoCloseable {
     private static Sink createSink(int sampleRate, int channels) throws IOException {
         AudioFormat format = new AudioFormat(sampleRate, 16, channels, true, false);
         DataLine.Info info = new DataLine.Info(SourceDataLine.class, format);
-        SourceDataLine candidate = null;
+        List<Exception> lineFailures = new ArrayList<>();
+
         try {
-            candidate = (SourceDataLine) AudioSystem.getLine(info);
-            candidate.open(format);
-            candidate.start();
-            return new LineSink(candidate);
+            return new LineSink(openLine(AudioSystem.getMixer(null), info, format));
         } catch (LineUnavailableException | IllegalArgumentException exception) {
-            if (candidate != null) candidate.close();
+            lineFailures.add(exception);
+        }
+
+        // 默认混音器不一定是输出设备；尝试所有系统提供的音频混音器。
+        for (Mixer.Info mixerInfo : AudioSystem.getMixerInfo()) {
             try {
-                Process process = new ProcessBuilder("paplay", "--playback", "--raw",
-                        "--format=s16le", "--rate=" + sampleRate,
-                        "--channels=" + channels, "--latency-msec=100",
-                        "--process-time-msec=50")
-                        .redirectError(ProcessBuilder.Redirect.INHERIT)
-                        .start();
-                return new PulseSink(process, sampleRate, channels);
-            } catch (IOException pulseException) {
-                pulseException.addSuppressed(exception);
-                throw new IOException(
-                        "无法打开系统音频输出设备，也无法连接 PulseAudio（paplay）",
-                        pulseException);
+                return new LineSink(openLine(AudioSystem.getMixer(mixerInfo), info, format));
+            } catch (LineUnavailableException | IllegalArgumentException exception) {
+                lineFailures.add(exception);
             }
         }
+
+        IOException lineFailure = new IOException(
+                describeLineFailures(lineFailures),
+                lineFailures.isEmpty() ? null : lineFailures.get(0));
+        for (int index = 1; index < lineFailures.size(); index++) {
+            lineFailure.addSuppressed(lineFailures.get(index));
+        }
+
+        Process process = null;
+        try {
+            process = new ProcessBuilder("paplay", "--playback", "--raw",
+                    "--format=s16le", "--rate=" + sampleRate,
+                    "--channels=" + channels, "--latency-msec=100",
+                    "--process-time-msec=50")
+                    .redirectError(ProcessBuilder.Redirect.INHERIT)
+                    .start();
+            if (process.waitFor(200, TimeUnit.MILLISECONDS)) {
+                throw new IOException("paplay 启动后立即退出，退出码：" + process.exitValue());
+            }
+            return new PulseSink(process, sampleRate, channels);
+        } catch (IOException | InterruptedException pulseException) {
+            if (process != null) process.destroyForcibly();
+            if (pulseException instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            IOException failure = new IOException(
+                    "无法打开系统音频输出。请检查音频设备/服务；Linux 可安装 paplay 并确认 PulseAudio 或 PipeWire 正在运行。"
+                            + " Java Sound：" + lineFailure.getMessage()
+                            + "；paplay：" + pulseException.getMessage(),
+                    pulseException);
+            failure.addSuppressed(lineFailure);
+            throw failure;
+        }
+    }
+
+    private static SourceDataLine openLine(Mixer mixer, DataLine.Info info, AudioFormat format)
+            throws LineUnavailableException {
+        SourceDataLine line = (SourceDataLine) mixer.getLine(info);
+        try {
+            line.open(format);
+            line.start();
+            return line;
+        } catch (LineUnavailableException | IllegalArgumentException exception) {
+            line.close();
+            throw exception;
+        }
+    }
+
+    private static String describeLineFailures(List<Exception> failures) {
+        if (failures.isEmpty()) return "没有发现可用的 Java Sound 混音器";
+        Exception lastFailure = failures.get(failures.size() - 1);
+        String message = lastFailure.getMessage();
+        return "未能打开 Java Sound 输出线路（尝试 " + failures.size() + " 次）："
+                + (message == null || message.isBlank()
+                ? lastFailure.getClass().getSimpleName() : message);
     }
 
     private static final class LineSink implements Sink {

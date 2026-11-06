@@ -22,7 +22,8 @@ public final class AdvancedPlayerAudioDevice implements AudioDevice {
             output = new PcmOutput(decoder.getOutputFrequency(), decoder.getOutputChannels(),
                     volume, startOffsetMillis);
         } catch (IOException | IllegalArgumentException exception) {
-            throw new JavaLayerException("无法打开 PCM 音频输出", exception);
+            throw new JavaLayerException("无法打开 PCM 音频输出："
+                    + exception.getMessage(), exception);
         }
     }
 
