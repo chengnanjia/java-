@@ -56,4 +56,12 @@ class SongFilterTest {
         assertTrue(SongFilter.matches(sunny, "qt"));
         assertTrue(SongFilter.matches(sunny, "zhou jie lun"));
     }
+
+    @Test
+    void supportsCommonAlternativePronunciations() {
+        Music chongqing = new Music("重庆", "未知歌手", "单曲", "/music/chongqing.mp3", null);
+        assertTrue(SongFilter.matches(chongqing, "chongqing"));
+        assertTrue(SongFilter.matches(chongqing, "zhongqing"));
+        assertTrue(SongFilter.matches(chongqing, "cq"));
+    }
 }
