@@ -1,7 +1,9 @@
 package com.musicplayer.ui;
 
 import com.musicplayer.model.Music;
+import com.musicplayer.search.SongFilter;
 
+import javax.swing.AbstractListModel;
 import javax.swing.DefaultListModel;
 import javax.swing.AbstractAction;
 import javax.swing.JComponent;
@@ -27,9 +29,11 @@ import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.HeadlessException;
 import java.awt.Toolkit;
+import java.awt.CardLayout;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.event.InputMethodEvent;
-import java.awt.event.InputMethodListener;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.KeyEvent;
@@ -44,10 +48,22 @@ import java.util.function.Supplier;
 
 public final class PlaylistPanel extends JPanel {
     private final DefaultListModel<Music> tracks = new DefaultListModel<>();
-    private final DefaultListModel<Music> visibleTracks = new DefaultListModel<>();
+    private final TrackListModel visibleTracks = new TrackListModel();
     private final JList<Music> list = new JList<>(visibleTracks);
     private final PlaylistCellRenderer renderer = new PlaylistCellRenderer();
-    private final JTextField search = new JTextField();
+    private boolean inputMethodComposing;
+    private final JTextField search = new JTextField() {
+        @Override protected void processInputMethodEvent(InputMethodEvent event) {
+            inputMethodComposing = hasComposedText(event);
+            super.processInputMethodEvent(event);
+            if (!inputMethodComposing) filterTimer.restart();
+        }
+    };
+    private final javax.swing.Timer filterTimer = new javax.swing.Timer(150, event -> {
+        if (!inputMethodComposing) filter();
+    });
+    private final JPanel listArea = new JPanel(new CardLayout());
+    private final JLabel emptyResult = new JLabel("没有找到匹配的歌曲", SwingConstants.CENTER);
     private final UndoManager searchUndoManager = new UndoManager();
     private final JLabel count = new JLabel("0 首歌曲");
     private final Supplier<Color> accentSupplier;
@@ -56,18 +72,19 @@ public final class PlaylistPanel extends JPanel {
     private Color accent = ThemeColorExtractor.DEFAULT;
     private String playingPath;
     private int equalizerFrame;
-    private boolean inputMethodComposing;
 
     public PlaylistPanel(Supplier<Color> accentSupplier) {
         this.accentSupplier = accentSupplier;
         clearSearchButton = new IconButton(IconPainter.IconType.CLEAR,
                 24, false, this.accentSupplier, "清空搜索");
+        filterTimer.setRepeats(false);
         setLayout(new BorderLayout(0, 16));
         setOpaque(false);
         setBorder(new EmptyBorder(15, 17, 15, 17));
         setPreferredSize(new Dimension(310, 0));
         buildHeader();
         buildList();
+        filter();
         add(buildFooter(), BorderLayout.SOUTH);
         installDropHandler();
         new javax.swing.Timer(33, event -> {
@@ -104,7 +121,7 @@ public final class PlaylistPanel extends JPanel {
         search.setBorder(new EmptyBorder(9, 0, 9, 0));
         java.awt.Font textFont = UIManager.getFont("TextField.font");
         if (textFont != null) search.setFont(textFont.deriveFont(12f));
-        search.setToolTipText("搜索歌名、歌手、专辑或文件名，支持中文拼音");
+        search.setToolTipText("搜索歌名、歌手或专辑，支持中文拼音");
         searchUndoManager.setLimit(100);
         search.getDocument().addUndoableEditListener(event -> {
             if (!inputMethodComposing) searchUndoManager.addEdit(event.getEdit());
@@ -113,19 +130,10 @@ public final class PlaylistPanel extends JPanel {
         clearSearchButton.addActionListener(() -> search.setText(""));
         clearSearchButton.setVisible(false);
         searchBox.add(clearSearchButton, BorderLayout.EAST);
-        search.addInputMethodListener(new InputMethodListener() {
-            @Override public void inputMethodTextChanged(InputMethodEvent event) {
-                CharacterIterator text = event.getText();
-                int textLength = 0;
-                if (text != null) {
-                    for (char character = text.first(); character != CharacterIterator.DONE;
-                         character = text.next()) textLength++;
-                }
-                inputMethodComposing = textLength > event.getCommittedCharacterCount();
-            }
-
-            @Override public void caretPositionChanged(InputMethodEvent event) {
-                // 光标变化不改变组合状态。
+        search.addFocusListener(new FocusAdapter() {
+            @Override public void focusLost(FocusEvent event) {
+                inputMethodComposing = false;
+                filterTimer.restart();
             }
         });
         search.getInputMap(JComponent.WHEN_FOCUSED).put(
@@ -145,9 +153,9 @@ public final class PlaylistPanel extends JPanel {
         });
         searchBox.add(search, BorderLayout.CENTER);
         search.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
-            @Override public void insertUpdate(javax.swing.event.DocumentEvent event) { updateClearSearchButton(); filter(); }
-            @Override public void removeUpdate(javax.swing.event.DocumentEvent event) { updateClearSearchButton(); filter(); }
-            @Override public void changedUpdate(javax.swing.event.DocumentEvent event) { updateClearSearchButton(); filter(); }
+            @Override public void insertUpdate(javax.swing.event.DocumentEvent event) { updateClearSearchButton(); scheduleFilter(); }
+            @Override public void removeUpdate(javax.swing.event.DocumentEvent event) { updateClearSearchButton(); scheduleFilter(); }
+            @Override public void changedUpdate(javax.swing.event.DocumentEvent event) { updateClearSearchButton(); scheduleFilter(); }
         });
         header.add(top, BorderLayout.NORTH);
         header.add(searchBox, BorderLayout.SOUTH);
@@ -201,6 +209,16 @@ public final class PlaylistPanel extends JPanel {
         clearSearchButton.setVisible(!search.getText().isEmpty());
     }
 
+    private boolean hasComposedText(InputMethodEvent event) {
+        CharacterIterator text = event.getText();
+        if (text == null) return false;
+        int textLength = 0;
+        for (char character = text.first(); character != CharacterIterator.DONE;
+             character = text.next()) textLength++;
+        // 在 JTextField 处理事件前更新状态，使组合期间产生的文档编辑不进入撤销栈。
+        return textLength > event.getCommittedCharacterCount();
+    }
+
     private void buildList() {
         list.setFocusable(true);
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
@@ -226,8 +244,10 @@ public final class PlaylistPanel extends JPanel {
         list.addMouseMotionListener(new MouseAdapter() {
             @Override public void mouseMoved(MouseEvent event) {
                 int index = list.locationToIndex(event.getPoint());
-                renderer.setActivePaths(selectedPath(), index >= 0 ? visibleTracks.get(index).getPath() : null);
-                renderer.setTargets(selectedPath(), index >= 0 ? visibleTracks.get(index).getPath() : null);
+                renderer.setActivePaths(selectedPath(), index >= 0
+                        ? visibleTracks.getElementAt(index).getPath() : null);
+                renderer.setTargets(selectedPath(), index >= 0
+                        ? visibleTracks.getElementAt(index).getPath() : null);
             }
         });
         JScrollPane scroll = new JScrollPane(list);
@@ -236,7 +256,11 @@ public final class PlaylistPanel extends JPanel {
         scroll.getViewport().setOpaque(false);
         scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         scroll.getVerticalScrollBar().setUnitIncrement(18);
-        add(scroll, BorderLayout.CENTER);
+        emptyResult.setForeground(new Color(145, 153, 166));
+        listArea.setOpaque(false);
+        listArea.add(scroll, "tracks");
+        listArea.add(emptyResult, "empty");
+        add(listArea, BorderLayout.CENTER);
     }
 
     private JPanel buildFooter() {
@@ -297,14 +321,18 @@ public final class PlaylistPanel extends JPanel {
         new SwingWorker<List<Music>, Void>() {
             @Override protected List<Music> doInBackground() {
                 List<Music> loaded = new ArrayList<>();
-                for (File file : toRead) loaded.add(Music.fromFile(file));
+                for (File file : toRead) {
+                    Music music = Music.fromFile(file);
+                    SongFilter.index(music);
+                    loaded.add(music);
+                }
                 return loaded;
             }
             @Override protected void done() {
                 try {
                     for (Music track : get()) tracks.addElement(track);
                     filter();
-                    if (visibleTracks.size() > 0 && list.getSelectedIndex() < 0) list.setSelectedIndex(0);
+                    if (visibleTracks.getSize() > 0 && list.getSelectedIndex() < 0) list.setSelectedIndex(0);
                 } catch (Exception ignored) {
                     count.setText("读取歌曲失败");
                 }
@@ -320,30 +348,34 @@ public final class PlaylistPanel extends JPanel {
         return false;
     }
 
+    private void scheduleFilter() {
+        filterTimer.restart();
+    }
+
     private void filter() {
-        String query = search.getText().trim();
+        String query = search.getText();
         Music selected = list.getSelectedValue();
-        visibleTracks.clear();
+        List<Music> filtered = SongFilter.filter(query, getTracks());
         int selectedIndex = -1;
-        for (int index = 0; index < tracks.size(); index++) {
-            Music track = tracks.get(index);
-            if (PlaylistSearch.matches(track, query)) {
-                if (selected != null && selected.getPath().equals(track.getPath())) {
-                    selectedIndex = visibleTracks.size();
-                }
-                visibleTracks.addElement(track);
+        for (int index = 0; index < filtered.size(); index++) {
+            if (selected != null && selected.getPath().equals(filtered.get(index).getPath())) {
+                selectedIndex = index;
             }
         }
+        visibleTracks.replaceAll(filtered);
         list.clearSelection();
         if (selectedIndex >= 0) {
             list.setSelectedIndex(selectedIndex);
+        } else if (visibleTracks.getSize() > 0) {
+            list.setSelectedIndex(0);
         }
-        if (query.isEmpty()) {
-            count.setText(tracks.size() + " 首歌曲");
-        } else if (visibleTracks.isEmpty()) {
-            count.setText("没有找到匹配歌曲（共 " + tracks.size() + " 首）");
+        boolean noResults = visibleTracks.getSize() == 0;
+        emptyResult.setText(query.isBlank() ? "曲库暂无歌曲" : "没有找到匹配的歌曲");
+        ((CardLayout) listArea.getLayout()).show(listArea, noResults ? "empty" : "tracks");
+        if (query.isBlank()) {
+            count.setText("共 " + tracks.size() + " 首");
         } else {
-            count.setText("找到 " + visibleTracks.size() + " / " + tracks.size() + " 首歌曲");
+            count.setText(visibleTracks.getSize() + " / 共 " + tracks.size() + " 首");
         }
         updateRendererTargets();
     }
@@ -399,7 +431,7 @@ public final class PlaylistPanel extends JPanel {
 
     public void playSelectedOrFirst() {
         Music selected = list.getSelectedValue();
-        if (selected == null && !visibleTracks.isEmpty()) selected = visibleTracks.get(0);
+        if (selected == null && visibleTracks.getSize() > 0) selected = visibleTracks.getElementAt(0);
         if (selected != null) onPlay.accept(selected);
     }
 
@@ -413,6 +445,28 @@ public final class PlaylistPanel extends JPanel {
         }
         @Override protected void paintComponent(java.awt.Graphics graphics) {
             IconPainter.paint((java.awt.Graphics2D) graphics, type, 0, 0, size, color);
+        }
+    }
+
+    private static final class TrackListModel extends AbstractListModel<Music> {
+        private List<Music> items = List.of();
+
+        @Override public int getSize() {
+            return items.size();
+        }
+
+        @Override public Music getElementAt(int index) {
+            return items.get(index);
+        }
+
+        void replaceAll(List<Music> replacement) {
+            if (items.equals(replacement)) return;
+            int oldSize = items.size();
+            items = List.copyOf(replacement);
+            int newSize = items.size();
+            // 用区间事件批量替换可见曲目，避免逐首增删造成连续重绘。
+            if (oldSize > 0) fireIntervalRemoved(this, 0, oldSize - 1);
+            if (newSize > 0) fireIntervalAdded(this, 0, newSize - 1);
         }
     }
 }

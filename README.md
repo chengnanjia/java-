@@ -9,7 +9,7 @@
 - 使用 Maven Shade Plugin 将运行依赖打入可执行 JAR，清单入口为 `com.musicplayer.ui.MainFrame`。
 - 加入 JUnit 5、Maven Surefire 和 UTF-8 源码编码配置，为后续自动化测试做准备。
 - 从 WAV/PCM 输出链路扩展到 FLAC 解码，支持 8/16/24 位单声道与立体声，并按 STREAMINFO 计算时长。
-- 曲库搜索支持拼音（如输入 `qing tian` 查找“晴天”），以及歌名、歌手、专辑和文件名匹配。
+- 曲库搜索支持中文、拼音和首字母（如输入 `qingtian` 或 `qt` 查找“晴天”），可匹配歌名、歌手与专辑。
 
 ## 已解决的问题
 
