@@ -1,0 +1,17 @@
+# Maven and compiled output
+target/
+bin/
+*.class
+
+# IDE settings
+.idea/
+.vscode/
+*.iml
+.project
+.classpath
+.settings/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+*:Zone.Identifier
