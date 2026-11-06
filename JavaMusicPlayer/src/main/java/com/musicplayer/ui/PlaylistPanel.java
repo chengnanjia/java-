@@ -9,6 +9,7 @@ import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
@@ -18,15 +19,21 @@ import javax.swing.TransferHandler;
 import javax.swing.UIManager;
 import javax.swing.border.EmptyBorder;
 import javax.swing.filechooser.FileNameExtensionFilter;
+import javax.swing.undo.UndoManager;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.HeadlessException;
+import java.awt.Toolkit;
 import java.awt.datatransfer.DataFlavor;
+import java.awt.event.InputMethodEvent;
+import java.awt.event.InputMethodListener;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.KeyEvent;
+import java.text.CharacterIterator;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -41,15 +48,20 @@ public final class PlaylistPanel extends JPanel {
     private final JList<Music> list = new JList<>(visibleTracks);
     private final PlaylistCellRenderer renderer = new PlaylistCellRenderer();
     private final JTextField search = new JTextField();
+    private final UndoManager searchUndoManager = new UndoManager();
     private final JLabel count = new JLabel("0 首歌曲");
     private final Supplier<Color> accentSupplier;
+    private final IconButton clearSearchButton;
     private Consumer<Music> onPlay = track -> { };
     private Color accent = ThemeColorExtractor.DEFAULT;
     private String playingPath;
     private int equalizerFrame;
+    private boolean inputMethodComposing;
 
     public PlaylistPanel(Supplier<Color> accentSupplier) {
         this.accentSupplier = accentSupplier;
+        clearSearchButton = new IconButton(IconPainter.IconType.CLEAR,
+                24, false, this.accentSupplier, "清空搜索");
         setLayout(new BorderLayout(0, 16));
         setOpaque(false);
         setBorder(new EmptyBorder(15, 17, 15, 17));
@@ -93,6 +105,29 @@ public final class PlaylistPanel extends JPanel {
         java.awt.Font textFont = UIManager.getFont("TextField.font");
         if (textFont != null) search.setFont(textFont.deriveFont(12f));
         search.setToolTipText("搜索歌名、歌手、专辑或文件名，支持中文拼音");
+        searchUndoManager.setLimit(100);
+        search.getDocument().addUndoableEditListener(event -> {
+            if (!inputMethodComposing) searchUndoManager.addEdit(event.getEdit());
+        });
+        installSearchEditingActions();
+        clearSearchButton.addActionListener(() -> search.setText(""));
+        clearSearchButton.setVisible(false);
+        searchBox.add(clearSearchButton, BorderLayout.EAST);
+        search.addInputMethodListener(new InputMethodListener() {
+            @Override public void inputMethodTextChanged(InputMethodEvent event) {
+                CharacterIterator text = event.getText();
+                int textLength = 0;
+                if (text != null) {
+                    for (char character = text.first(); character != CharacterIterator.DONE;
+                         character = text.next()) textLength++;
+                }
+                inputMethodComposing = textLength > event.getCommittedCharacterCount();
+            }
+
+            @Override public void caretPositionChanged(InputMethodEvent event) {
+                // 光标变化不改变组合状态。
+            }
+        });
         search.getInputMap(JComponent.WHEN_FOCUSED).put(
                 javax.swing.KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "focus-track-list");
         search.getActionMap().put("focus-track-list", new AbstractAction() {
@@ -110,13 +145,60 @@ public final class PlaylistPanel extends JPanel {
         });
         searchBox.add(search, BorderLayout.CENTER);
         search.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
-            @Override public void insertUpdate(javax.swing.event.DocumentEvent event) { filter(); }
-            @Override public void removeUpdate(javax.swing.event.DocumentEvent event) { filter(); }
-            @Override public void changedUpdate(javax.swing.event.DocumentEvent event) { filter(); }
+            @Override public void insertUpdate(javax.swing.event.DocumentEvent event) { updateClearSearchButton(); filter(); }
+            @Override public void removeUpdate(javax.swing.event.DocumentEvent event) { updateClearSearchButton(); filter(); }
+            @Override public void changedUpdate(javax.swing.event.DocumentEvent event) { updateClearSearchButton(); filter(); }
         });
         header.add(top, BorderLayout.NORTH);
         header.add(searchBox, BorderLayout.SOUTH);
         add(header, BorderLayout.NORTH);
+    }
+
+    private void installSearchEditingActions() {
+        int menuMask;
+        try {
+            menuMask = Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
+        } catch (HeadlessException exception) {
+            menuMask = KeyEvent.CTRL_DOWN_MASK;
+        }
+        bindSearchAction("undo-search", KeyEvent.VK_Z, menuMask, new AbstractAction() {
+            @Override public void actionPerformed(java.awt.event.ActionEvent event) {
+                if (searchUndoManager.canUndo()) searchUndoManager.undo();
+            }
+        });
+        bindSearchAction("redo-search", KeyEvent.VK_Y, menuMask, new AbstractAction() {
+            @Override public void actionPerformed(java.awt.event.ActionEvent event) {
+                if (searchUndoManager.canRedo()) searchUndoManager.redo();
+            }
+        });
+        bindSearchAction("redo-search-shift-z", KeyEvent.VK_Z,
+                menuMask | KeyEvent.SHIFT_DOWN_MASK,
+                search.getActionMap().get("redo-search"));
+
+        JPopupMenu menu = new JPopupMenu();
+        menu.add("撤销").addActionListener(event -> {
+            if (searchUndoManager.canUndo()) searchUndoManager.undo();
+        });
+        menu.add("重做").addActionListener(event -> {
+            if (searchUndoManager.canRedo()) searchUndoManager.redo();
+        });
+        menu.addSeparator();
+        menu.add("剪切").addActionListener(event -> search.cut());
+        menu.add("复制").addActionListener(event -> search.copy());
+        menu.add("粘贴").addActionListener(event -> search.paste());
+        menu.addSeparator();
+        menu.add("全选").addActionListener(event -> search.selectAll());
+        search.setComponentPopupMenu(menu);
+    }
+
+    private void bindSearchAction(String name, int keyCode, int modifiers, javax.swing.Action action) {
+        search.getInputMap(JComponent.WHEN_FOCUSED).put(
+                javax.swing.KeyStroke.getKeyStroke(keyCode, modifiers), name);
+        search.getActionMap().put(name, action);
+    }
+
+    private void updateClearSearchButton() {
+        clearSearchButton.setVisible(!search.getText().isEmpty());
     }
 
     private void buildList() {

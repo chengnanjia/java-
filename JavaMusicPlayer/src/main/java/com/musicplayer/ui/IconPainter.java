@@ -14,7 +14,7 @@ public final class IconPainter {
     public enum IconType {
         PLAY, PAUSE, STOP, PREVIOUS, NEXT, VOLUME, MUTED,
         REPEAT, REPEAT_ONE, SHUFFLE, ADD, CLOSE, MINIMIZE, MAXIMIZE,
-        RESTORE, SEARCH, SIDEBAR
+        RESTORE, SEARCH, SIDEBAR, CLEAR
     }
 
     private IconPainter() {
@@ -94,6 +94,7 @@ public final class IconPainter {
                 g.draw(new RoundRectangle2D.Double(3.5, 4.5, 17, 15, 4, 4));
                 g.drawLine(9, 5, 9, 19);
             }
+            case CLEAR -> { g.drawLine(7, 7, 17, 17); g.drawLine(17, 7, 7, 17); }
         }
         g.dispose();
     }
