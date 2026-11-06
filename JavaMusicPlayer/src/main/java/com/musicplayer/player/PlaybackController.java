@@ -2,13 +2,17 @@ package com.musicplayer.player;
 
 import com.mpatric.mp3agic.Mp3File;
 import com.musicplayer.model.Music;
+import com.musicplayer.player.decode.AudioDecoder;
+import com.musicplayer.player.decode.WavDecoder;
 import com.musicplayer.player.output.AdvancedPlayerAudioDevice;
+import com.musicplayer.player.output.PcmOutput;
 import javazoom.jl.decoder.JavaLayerException;
 import javazoom.jl.player.advanced.AdvancedPlayer;
 
 import java.io.BufferedInputStream;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -33,6 +37,7 @@ public final class PlaybackController {
     private Music currentMusic;
     private AdvancedPlayer activePlayer;
     private AdvancedPlayerAudioDevice activeDevice;
+    private PcmPlaybackSession activePcmSession;
     private long durationMillis;
     private long positionMillis;
     private int frameCount;
@@ -63,6 +68,10 @@ public final class PlaybackController {
     }
 
     private void prepareTrack(long token, Music music) {
+        if (isWavTrack(music)) {
+            preparePcmTrack(token, music, 0, true);
+            return;
+        }
         try {
             Mp3File mp3File = new Mp3File(music.getPath());
             synchronized (lock) {
@@ -78,6 +87,76 @@ public final class PlaybackController {
         } catch (Exception exception) {
             reportError(token, exception);
         }
+    }
+
+    private void preparePcmTrack(long token, Music music, long startOffsetMillis,
+                                boolean notifyReady) {
+        AudioDecoder decoder = new WavDecoder();
+        try {
+            decoder.open(Path.of(music.getPath()));
+            long trackDuration = decoder.durationMillis();
+            synchronized (lock) {
+                if (token != generation) {
+                    decoder.close();
+                    return;
+                }
+                durationMillis = trackDuration;
+            }
+            if (notifyReady) listener.onReady(trackDuration);
+            synchronized (lock) {
+                if (token != generation || paused) {
+                    decoder.close();
+                    return;
+                }
+            }
+            long start = Math.max(0, Math.min(trackDuration, startOffsetMillis));
+            if (start > 0) decoder.seekTo(start);
+            PcmOutput output = new PcmOutput(decoder.sampleRate(), decoder.channels(),
+                    volume, start);
+            PcmPlaybackSession session = new PcmPlaybackSession(decoder, output,
+                    position -> {
+                        boolean current;
+                        synchronized (lock) {
+                            current = token == generation && !paused;
+                            if (current) positionMillis = position;
+                        }
+                        if (current) listener.onPosition(position);
+                    },
+                    () -> {
+                        boolean current;
+                        synchronized (lock) {
+                            current = token == generation && !paused;
+                            if (current) {
+                                positionMillis = durationMillis;
+                                activePcmSession = null;
+                            }
+                        }
+                        if (current) {
+                            listener.onPosition(durationMillis);
+                            listener.onEnd();
+                        }
+                    },
+                    exception -> reportError(token, exception));
+            synchronized (lock) {
+                if (token != generation || paused) {
+                    session.close();
+                    return;
+                }
+                activePcmSession = session;
+            }
+            session.start();
+        } catch (Exception exception) {
+            try {
+                decoder.close();
+            } catch (IOException closeException) {
+                exception.addSuppressed(closeException);
+            }
+            reportError(token, exception);
+        }
+    }
+
+    private boolean isWavTrack(Music music) {
+        return music.getPath().toLowerCase(java.util.Locale.ROOT).endsWith(".wav");
     }
 
     private void startSession(long token, Music music, int startFrame, long startOffsetMillis) {
@@ -141,6 +220,9 @@ public final class PlaybackController {
                 frame = frameAt(positionMillis);
             } else {
                 if (activeDevice != null) positionMillis = activeDevice.getPositionMillis();
+                if (activePcmSession != null) {
+                    positionMillis = activePcmSession.getPositionMillis();
+                }
                 paused = true;
                 ++generation;
                 stopActiveLocked();
@@ -150,7 +232,8 @@ public final class PlaybackController {
             }
         }
         if (resume) {
-            if (frameCount == 0) prepareTrack(token, music);
+            if (isWavTrack(music)) preparePcmTrack(token, music, positionMillis, false);
+            else if (frameCount == 0) prepareTrack(token, music);
             else startSession(token, music, frame, positionMillis);
         } else {
             listener.onPosition(positionMillis);
@@ -174,9 +257,9 @@ public final class PlaybackController {
         int frame;
         boolean restart;
         synchronized (lock) {
-            if (currentMusic == null || durationMillis <= 0 || frameCount <= 0) return;
+            if (currentMusic == null || durationMillis <= 0) return;
             positionMillis = Math.max(0, Math.min(durationMillis, requestedPositionMillis));
-            frame = frameAt(positionMillis);
+            frame = frameCount <= 0 ? 0 : frameAt(positionMillis);
             music = currentMusic;
             restart = !paused;
             if (restart) {
@@ -188,13 +271,17 @@ public final class PlaybackController {
             }
         }
         listener.onPosition(positionMillis);
-        if (restart) startSession(token, music, frame, positionMillis);
+        if (restart) {
+            if (isWavTrack(music)) preparePcmTrack(token, music, positionMillis, false);
+            else startSession(token, music, frame, positionMillis);
+        }
     }
 
     public void setVolume(double volume) {
         this.volume = Math.max(0, Math.min(1, volume));
         synchronized (lock) {
             if (activeDevice != null) activeDevice.setVolume(this.volume);
+            if (activePcmSession != null) activePcmSession.setVolume(this.volume);
         }
     }
 
@@ -208,6 +295,7 @@ public final class PlaybackController {
         synchronized (lock) {
             if (paused) return;
             if (activeDevice != null) positionMillis = activeDevice.getPositionMillis();
+            if (activePcmSession != null) positionMillis = activePcmSession.getPositionMillis();
             position = positionMillis;
         }
         listener.onPosition(position);
@@ -225,6 +313,10 @@ public final class PlaybackController {
             activePlayer = null;
             activeDevice = null;
         }
+        if (activePcmSession != null) {
+            activePcmSession.close();
+            activePcmSession = null;
+        }
     }
 
     private void reportError(long token, Exception exception) {
@@ -233,7 +325,7 @@ public final class PlaybackController {
         }
         String message = exception.getMessage();
         listener.onError(message == null || message.trim().isEmpty()
-                ? "无法播放该 MP3 文件" : message);
+                ? "无法播放该音频文件" : message);
     }
 
 }
